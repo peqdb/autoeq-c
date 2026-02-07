@@ -1,6 +1,6 @@
 # autoeq-c
 
-Fast parametric EQ fitter in C.
+Blazing fast and accurate AutoEQ in C that produces high-quality, rig-aware results.
 
 This repo contains:
 
