@@ -7,9 +7,6 @@
 
 #ifdef WASM
 #	include <emscripten/emscripten.h>
-#	define EXPORT EMSCRIPTEN_KEEPALIVE
-#else
-#	define EXPORT
 #endif
 
 typedef struct {
@@ -496,7 +493,7 @@ static void treble_rolloff(const f32 *restrict f, f32 *restrict r, f32 f_treble)
 	}
 }
 
-EXPORT f32 preprocess(
+f32 preprocess(
 	const f32 *restrict f, const f32 *restrict dst,
 	const f32 *restrict src, f32 *restrict r, const Smooth *smooth, bool demean)
 {
@@ -521,7 +518,7 @@ EXPORT f32 preprocess(
 	return mean;
 }
 
-EXPORT f32 autoeq(
+f32 autoeq(
 	i32 steps,
 	const Type *restrict types,
 	f32 *restrict f0,

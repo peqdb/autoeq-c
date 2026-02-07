@@ -119,6 +119,8 @@ Output (stdout):
 - Then `N` lines, one per filter:
   - `<type> <f0> <gain> <Q>`
 
+There is a minimal Python example in [example/autoeq.py](example/autoeq.py) with `NumPy` and `subprocess` that demonstrates how to call the native binary.
+
 ## License
 
 LGPL-3.0-or-later. See [LICENSE](LICENSE).
