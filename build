@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # would like to use -mrelaxed-simd but apparently not available in safari..
-emcc src/*.c -o autoeq.js \
+emcc src/*.c -o autoeq-wasm.js \
     -O3 -ffast-math -msimd128 -Wall -Wextra -Wpedantic \
     -D WASM=1 -s SINGLE_FILE=1 -s TOTAL_STACK=1mb -s WASM=1 -s -s EXPORT_ES6=1 -s MODULARIZE=1 --pre-js web/pre.js \
     -s "EXPORTED_RUNTIME_METHODS=['cwrap','ccall','getValue','setValue','HEAP32','HEAPF32']" \

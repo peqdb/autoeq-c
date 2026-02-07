@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: LGPL-3.0-or-later
  */
 
-/* run ./build and move autoeq.js to wasm/ */
+/* run ./build and move autoeq-wasm.js to this folder */
 
-import Module from './wasm/autoeq';
+import Module from './autoeq-wasm';
 
 const N = 384,
       X0 = 20,
@@ -17,51 +17,83 @@ const N = 384,
 export const LX = Array.from({ length: N }, (_, i) => LXR/(N - 1)*i + LX0);
 export const X  = LX.map(Math.exp);
 
-export interface Filter {
-  type: Type;
-  f0: number;
-  gain: number;
-  q: number;
-};
+/**
+ * @typedef {'PK'|'LSC'|'HSC'} FilterType
+ */
 
-enum Type {
-  PK  = 0,
-  LSC = 1,
-  HSC = 2,
-};
+/**
+ * @typedef {{
+ *   type: FilterType,
+ *   f0: number,
+ *   gain: number,
+ *   q: number,
+ * }} Filter
+ */
 
-export enum Smooth {
-  NONE = 0,
-  IE   = 1,
-  OE   = 2,
-};
+/**
+ * @readonly
+ * @enum {number}
+ */
+const Type = Object.freeze({
+  PK: 0,
+  LSC: 1,
+  HSC: 2,
+});
 
-type Lim = [number, number];
+/** @type {ReadonlyArray<FilterType>} */
+const TYPE_NAMES = Object.freeze(['PK', 'LSC', 'HSC']);
 
-interface Spec {
-  type: Type;
-  f0: Lim;
-  gain: Lim;
-  q: Lim;
-};
+/**
+ * @readonly
+ * @enum {number}
+ */
+export const Smooth = Object.freeze({
+  NONE: 0,
+  IE: 1,
+  OE: 2,
+});
 
-export interface Inst {
-  m: Module;
-};
+/**
+ * @typedef {[number, number]} Lim
+ */
 
-export async function make(): Promise<Inst> {
+/**
+ * @typedef {{
+ *   type: number,
+ *   f0: Lim,
+ *   gain: Lim,
+ *   q: Lim,
+ * }} Spec
+ */
+
+/**
+ * @typedef {{
+ *   m: any,
+ * }} Inst
+ */
+
+/** @returns {Promise<Inst>} */
+export async function make() {
   const m = await Module();
   return { m };
 }
 
-export interface Config {
-  specs: Spec[];
-  smooth: boolean;
-  demean: boolean;
-};
+/**
+ * @typedef {{
+ *   specs: Spec[],
+ *   smooth: boolean,
+ *   demean: boolean,
+ * }} Config
+ */
 
+/**
+ * @type {{
+ *   STANDARD: (n?: number) => Config,
+ *   PRECISE: (n?: number) => Config,
+ * }}
+ */
 export const CONFIGS = {
-  STANDARD: (n: number = 10) => ({
+  STANDARD: (n = 10) => ({
     specs: [
       { type: Type.LSC, f0: [20, 16_000], gain: [-16, 16], q: [.4, 3.] },
       { type: Type.HSC, f0: [20, 16_000], gain: [-16, 16], q: [.4, 3.] },
@@ -70,8 +102,8 @@ export const CONFIGS = {
     ],
     smooth: true,
     demean: true,
-  } as Config),
-  PRECISE: (n: number = 10) => ({
+  }),
+  PRECISE: (n = 10) => ({
     specs: [
       { type: Type.LSC, f0: [20, 16_000], gain: [-16, 16], q: [.4, 3.] },
       { type: Type.HSC, f0: [20, 16_000], gain: [-16, 16], q: [.4, 3.] },
@@ -80,10 +112,20 @@ export const CONFIGS = {
     ],
     smooth: false,
     demean: true,
-  } as Config),
+  }),
 };
 
-export function run(s: Inst, dst: number[], src: number[], config: Config, smooth = Smooth.NONE, steps = 3000, fs = 48_000) {
+/**
+ * @param {Inst} s
+ * @param {ArrayLike<number>} dst
+ * @param {ArrayLike<number>} src
+ * @param {Config} config
+ * @param {number} [smooth]
+ * @param {number} [steps]
+ * @param {number} [fs]
+ * @returns {{ filters: Filter[], time: number, loss: number, amp: number } | null}
+ */
+export function run(s, dst, src, config, smooth = Smooth.NONE, steps = 3000, fs = 48_000) {
   if (dst.length !== N || src.length !== N) {
     console.error(`dst and src must have length ${N}`);
     return null;
@@ -91,9 +133,9 @@ export function run(s: Inst, dst: number[], src: number[], config: Config, smoot
 
   const types = Int32Array.from(config.specs.map(s => s.type));
 
-  let allocs: any[] = [];
+  let allocs = [];
 
-  function alloc(sz: number) {
+  function alloc(sz) {
     const p = s.m._malloc(sz);
     allocs.push(p);
     return p;
@@ -158,11 +200,12 @@ export function run(s: Inst, dst: number[], src: number[], config: Config, smoot
 
   const amp = config.demean ? s.m.HEAPF32[pAmp >> 2] : 0;
 
-  const filters: Filter[] = [];
+  /** @type {Filter[]} */
+  const filters = [];
 
   for (let i = 0; i < n; i++) {
     filters.push({
-      type: Type[types[i]] as any,
+      type: TYPE_NAMES[types[i]] ?? /** @type {any} */ (types[i]),
       f0: f0[i],
       gain: gain[i],
       q: q[i],
@@ -179,7 +222,12 @@ export function run(s: Inst, dst: number[], src: number[], config: Config, smoot
   };
 }
 
-export function interp(x: number[], y: number[]) {
+/**
+ * @param {number[]} x
+ * @param {number[]} y
+ * @returns {number[]}
+ */
+export function interp(x, y) {
   if (x.length !== y.length) {
     console.error('x and y must have the same length');
     return [];

@@ -1,5 +1,3 @@
-/* run ./build and move autoeq.js to wasm/ */
-
 import * as autoeq from './autoeq';
 
 const inst = await autoeq.make();

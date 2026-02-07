@@ -17,9 +17,9 @@ Build:
 
 - `./build`
 
-This produces a single-file Emscripten module `autoeq.js` in the current folder.
+This produces a single-file Emscripten module `autoeq-wasm.js` in the current folder.
 
-The intended consumer is the TypeScript wrapper in [example/autoeq.ts](example/autoeq.ts).
+The intended consumer is the JavaScript wrapper in [example/autoeq.js](example/autoeq.js).
 
 Three functions are provided:
 
@@ -29,7 +29,7 @@ Three functions are provided:
 
 Notes:
 
-- The frequency axis is fixed to 384 log-spaced points `X` from 20 Hz → 20 kHz. If your data isn’t already on the internal `X` grid, use the provide linear interpolation function `interp(x, y)` from `example/autoeq.ts`.
+- The frequency axis is fixed to 384 log-spaced points `X` from 20 Hz → 20 kHz. If your data isn’t already on the internal `X` grid, use the provide linear interpolation function `interp(x, y)` from `example/autoeq.js`.
 - `interp()` is linear interpolation. If you resample very dense data (e.g. raw FFT / measurement output) directly down to 384 points you will introduce aliasing artifacts. Prefer to bin/average onto a log-spaced grid and/or apply some smoothing before interpolating.
 - The number of filters must be <= 32. Default configs are provided as `autoeq.CONFIGS.STANDARD(N)` and `autoeq.CONFIGS.PRECISE(N)`.
 
