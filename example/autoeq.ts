@@ -1,0 +1,225 @@
+/*
+ * Copyright (C) 2026 PEQdB Inc.
+ * SPDX-License-Identifier: LGPL-3.0-or-later
+ */
+
+/* run ./build and move autoeq.js to wasm/ */
+
+import Module from './wasm/autoeq';
+
+const N = 384,
+      X0 = 20,
+      X1 = 20_000,
+      LX0 = Math.log(X0),
+      LX1 = Math.log(X1),
+      LXR = LX1 - LX0;
+
+export const LX = Array.from({ length: N }, (_, i) => LXR/(N - 1)*i + LX0);
+export const X  = LX.map(Math.exp);
+
+export interface Filter {
+  type: Type;
+  f0: number;
+  gain: number;
+  q: number;
+};
+
+enum Type {
+  PK  = 0,
+  LSC = 1,
+  HSC = 2,
+};
+
+export enum Smooth {
+  NONE = 0,
+  IE   = 1,
+  OE   = 2,
+};
+
+type Lim = [number, number];
+
+interface Spec {
+  type: Type;
+  f0: Lim;
+  gain: Lim;
+  q: Lim;
+};
+
+export interface Inst {
+  m: Module;
+};
+
+export async function make(): Promise<Inst> {
+  const m = await Module();
+  return { m };
+}
+
+export interface Config {
+  specs: Spec[];
+  smooth: boolean;
+  demean: boolean;
+};
+
+export const CONFIGS = {
+  STANDARD: (n: number = 10) => ({
+    specs: [
+      { type: Type.LSC, f0: [20, 16_000], gain: [-16, 16], q: [.4, 3.] },
+      { type: Type.HSC, f0: [20, 16_000], gain: [-16, 16], q: [.4, 3.] },
+      ...Array(n - 2).fill(
+        { type: Type.PK , f0: [20, 16_000], gain: [-16, 16], q: [.4, 4.] })
+    ],
+    smooth: true,
+    demean: true,
+  } as Config),
+  PRECISE: (n: number = 10) => ({
+    specs: [
+      { type: Type.LSC, f0: [20, 16_000], gain: [-16, 16], q: [.4, 3.] },
+      { type: Type.HSC, f0: [20, 16_000], gain: [-16, 16], q: [.4, 3.] },
+      ...Array(n - 2).fill(
+        { type: Type.PK , f0: [20, 16_000], gain: [-16, 16], q: [.4, 4.] })
+    ],
+    smooth: false,
+    demean: true,
+  } as Config),
+};
+
+export function run(s: Inst, dst: number[], src: number[], config: Config, smooth = Smooth.NONE, steps = 3000, fs = 48_000) {
+  if (dst.length !== N || src.length !== N) {
+    console.error(`dst and src must have length ${N}`);
+    return null;
+  }
+
+  const types = Int32Array.from(config.specs.map(s => s.type));
+
+  let allocs: any[] = [];
+
+  function alloc(sz: number) {
+    const p = s.m._malloc(sz);
+    allocs.push(p);
+    return p;
+  }
+
+  const k = N,
+        n = types.length;
+
+  const pF   = alloc(k * 4),
+        pDst = alloc(k * 4),
+        pSrc = alloc(k * 4),
+        pR   = alloc(k * 4);
+
+  s.m.HEAPF32.set(X, pF >> 2);
+  s.m.HEAPF32.set(dst, pDst >> 2);
+  s.m.HEAPF32.set(src, pSrc >> 2);
+
+  const pTypes = alloc(n * 4),
+        pF0    = alloc(n * 4),
+        pGain  = alloc(n * 4),
+        pQ     = alloc(n * 4),
+        pAmp   = alloc(4);
+
+  s.m.HEAP32.set(types, pTypes >> 2);
+
+  const pF0Lim   = alloc(n * 8),
+        pGainLim = alloc(n * 8),
+        pQLim    = alloc(n * 8);
+
+  config.specs.forEach((spec, i) => {
+    let p = (pF0Lim >> 2) + 2*i;
+    s.m.HEAPF32[p + 0] = spec.f0[0];
+    s.m.HEAPF32[p + 1] = spec.f0[1];
+
+    p = (pGainLim >> 2) + 2*i;
+    s.m.HEAPF32[p + 0] = spec.gain[0];
+    s.m.HEAPF32[p + 1] = spec.gain[1];
+
+    p = (pQLim >> 2) + 2*i;
+    s.m.HEAPF32[p + 0] = spec.q[0];
+    s.m.HEAPF32[p + 1] = spec.q[1];
+  });
+
+  let pSmooth = !config.smooth ? null
+    : smooth == Smooth.IE ? s.m._get_ie_smooth()
+    : smooth == Smooth.OE ? s.m._get_oe_smooth()
+    : null;
+
+  const t0 = performance.now();
+
+  const mean = s.m._preprocess(pF, pDst, pSrc, pR, pSmooth, config.demean);
+  const loss = s.m._autoeq(
+    steps, pTypes, pF0, pGain, pQ, config.demean ? pAmp : 0,
+    pF0Lim, pGainLim, pQLim,
+    n, pF, pR, fs);
+
+  const t1 = performance.now();
+
+  const f0   = new Float32Array(s.m.HEAPF32.buffer, pF0, n),
+        gain = new Float32Array(s.m.HEAPF32.buffer, pGain, n),
+        q    = new Float32Array(s.m.HEAPF32.buffer, pQ, n);
+
+  const amp = config.demean ? s.m.HEAPF32[pAmp >> 2] : 0;
+
+  const filters: Filter[] = [];
+
+  for (let i = 0; i < n; i++) {
+    filters.push({
+      type: Type[types[i]] as any,
+      f0: f0[i],
+      gain: gain[i],
+      q: q[i],
+    });
+  }
+
+  allocs.forEach(s.m._free);
+
+  return {
+    filters,
+    time: t1 - t0,
+    loss,
+    amp: mean + amp,
+  };
+}
+
+export function interp(x: number[], y: number[]) {
+  if (x.length !== y.length) {
+    console.error('x and y must have the same length');
+    return [];
+  }
+
+  if (x.length < 2) {
+    console.error('x and y must have length >= 2');
+    return [];
+  }
+
+  const n = x.length;
+
+  const lx = x.map(Math.log);
+  const out = Array(X.length);
+
+  let i = 0;
+  for (let j = 0; j < X.length; ++j) {
+    const t = Math.log(X[j]);
+
+    if (t <= lx[0]) {
+      out[j] = y[0];
+      continue;
+    }
+
+    if (t >= lx[n - 1]) {
+      out[j] = y[n - 1];
+      continue;
+    }
+
+    while (i + 1 < n - 1 && lx[i + 1] < t)
+      ++i;
+
+    const x0 = lx[i],
+          x1 = lx[i + 1];
+
+    const den = x1 - x0;
+    const u = den === 0 ? 0 : (t - x0) / den;
+
+    out[j] = y[i] + u * (y[i + 1] - y[i]);
+  }
+
+  return out;
+}
