@@ -439,24 +439,39 @@ static void adaptive_smooth(const Smooth *s, const f32 *restrict f, f32 *restric
 
 			/* positive / negative bias */
 			bias = s->bias_lo + (s->bias_md - s->bias_lo)*sgm(l, bias_l0, bias_l1)
-				              + (s->bias_hi - s->bias_md)*sgm(l, bias_l2, bias_l3),
+				              + (s->bias_hi - s->bias_md)*sgm(l, bias_l2, bias_l3);
 
-			a = 0.f,
-			c = 0.f;
+		f32 max_left = x_k, max_right = x_k;
+		bool clipped = false;
+		for (i32 j = -H; j < 0; ++j) {
+			i32 s_idx = k + j;
+			s_idx = (s_idx < 0) ? 0 : (s_idx > clip_idx) ? clip_idx : s_idx;
+			if (x[s_idx] > max_left) max_left = x[s_idx];
+		}
+		for (i32 j = 1; j <= H; ++j) {
+			i32 s_idx = k + j;
+			if (s_idx >= clip_idx) {
+				clipped = true;
+				break;
+			}
+			if (x[s_idx] > max_right) max_right = x[s_idx];
+		}
+		f32 dip_depth = fmaxf(0.f, fminf(max_left - x_k, max_right - x_k));
+		if (clipped && max_right <= x_k) dip_depth = 0.f;
+		
+		f32 effective_smooth_hi = 0.1f - (0.1f - s->smooth_hi) * sgm(dip_depth, 1.0f, 4.0f);
+		f32 current_sigma = s->smooth_lo + (effective_smooth_hi - s->smooth_lo) * sgm(l, smooth_l0, smooth_l1);
+		
+		f32 a = 0.f, c = 0.f;
 
 		for (i32 j = -H; j <= H; ++j) {
-			i32 s = k + j;
-			s = s < 0 ? 0
-			  : s > clip_idx ? clip_idx
-			  : s;
-
-			f32 x_s = x[s],
-				d_spatial = sq((f32)j * sigma),
+			i32 s_idx = k + j;
+			s_idx = (s_idx < 0) ? 0 : (s_idx > clip_idx) ? clip_idx : s_idx;
+			f32 x_s = x[s_idx],
+				d_spatial = sq((f32)j * current_sigma),
 				d_range   = bias * (x_s - x_k);
-
 			f32 w = expf(-.5f*d_spatial + d_range);
-
-			a += w * x[s];
+			a += w * x[s_idx];
 			c += w;
 		}
 
@@ -483,6 +498,8 @@ static void treble_rolloff(const f32 *restrict f, f32 *restrict r, f32 f_treble)
 {
 	i32 treble_idx = search(f, K, f_treble),
 		n_treble = K - treble_idx;
+	
+	if (n_treble <= 1) return;
 
 	f32 inv = 1.f / (f32)(n_treble - 1);
 
@@ -497,8 +514,8 @@ f32 preprocess(
 	const f32 *restrict f, const f32 *restrict dst,
 	const f32 *restrict src, f32 *restrict r, const Smooth *smooth, bool demean)
 {
-	f32 F_TREBLE_SMOOTH   = 16000.f,
-		F_TREBLE_UNSMOOTH = 18500.f;
+	f32 F_TREBLE_SMOOTH   = 20000.f,
+		F_TREBLE_UNSMOOTH = 20000.f;
 
 	f32 b[K];
 	memcpy(b, src, sizeof(*src) * K);
@@ -568,7 +585,7 @@ const Smooth *get_ie_smooth(void)
 		.bias_f0 = 10000.f, .bias_f1 = 13000.f,
 		.bias_f2 = 14000.f, .bias_f3 = 20000.f,
 
-		.clip_f = 18500.f,
+		.clip_f = 20000.f,
 	};
 
 	return &IE_SMOOTH;
@@ -589,7 +606,7 @@ const Smooth *get_oe_smooth(void)
 		.bias_f0 = 6000.f, .bias_f1 =  9000.f,
 		.bias_f2 = 9000.f, .bias_f3 = 20000.f,
 
-		.clip_f = 17000.f,
+		.clip_f = 20000.f,
 	};
 
 	return &OE_SMOOTH;
@@ -604,38 +621,38 @@ typedef struct {
 
 #define A(...) {__VA_ARGS__}
 #define FILTERS(X) \
-	X(LSC, A(20.f, 16000.f), A(-16.f, 16.f), A(.4f, 3.f)) \
-	X(HSC, A(20.f, 16000.f), A(-16.f, 16.f), A(.4f, 3.f)) \
-	X(PK , A(20.f, 16000.f), A(-16.f, 16.f), A(.4f, 4.f)) \
-	X(PK , A(20.f, 16000.f), A(-16.f, 16.f), A(.4f, 4.f)) \
-	X(PK , A(20.f, 16000.f), A(-16.f, 16.f), A(.4f, 4.f)) \
-	X(PK , A(20.f, 16000.f), A(-16.f, 16.f), A(.4f, 4.f)) \
-	X(PK , A(20.f, 16000.f), A(-16.f, 16.f), A(.4f, 4.f)) \
-	X(PK , A(20.f, 16000.f), A(-16.f, 16.f), A(.4f, 4.f)) \
-	X(PK , A(20.f, 16000.f), A(-16.f, 16.f), A(.4f, 4.f)) \
-	X(PK , A(20.f, 16000.f), A(-16.f, 16.f), A(.4f, 4.f)) \
-	X(PK , A(20.f, 16000.f), A(-16.f, 16.f), A(.4f, 4.f)) \
-	X(PK , A(20.f, 16000.f), A(-16.f, 16.f), A(.4f, 4.f)) \
-	X(PK , A(20.f, 16000.f), A(-16.f, 16.f), A(.4f, 4.f)) \
-	X(PK , A(20.f, 16000.f), A(-16.f, 16.f), A(.4f, 4.f)) \
-	X(PK , A(20.f, 16000.f), A(-16.f, 16.f), A(.4f, 4.f)) \
-	X(PK , A(20.f, 16000.f), A(-16.f, 16.f), A(.4f, 4.f)) \
-	X(PK , A(20.f, 16000.f), A(-16.f, 16.f), A(.4f, 4.f)) \
-	X(PK , A(20.f, 16000.f), A(-16.f, 16.f), A(.4f, 4.f)) \
-	X(PK , A(20.f, 16000.f), A(-16.f, 16.f), A(.4f, 4.f)) \
-	X(PK , A(20.f, 16000.f), A(-16.f, 16.f), A(.4f, 4.f)) \
-	X(PK , A(20.f, 16000.f), A(-16.f, 16.f), A(.4f, 4.f)) \
-	X(PK , A(20.f, 16000.f), A(-16.f, 16.f), A(.4f, 4.f)) \
-	X(PK , A(20.f, 16000.f), A(-16.f, 16.f), A(.4f, 4.f)) \
-	X(PK , A(20.f, 16000.f), A(-16.f, 16.f), A(.4f, 4.f)) \
-	X(PK , A(20.f, 16000.f), A(-16.f, 16.f), A(.4f, 4.f)) \
-	X(PK , A(20.f, 16000.f), A(-16.f, 16.f), A(.4f, 4.f)) \
-	X(PK , A(20.f, 16000.f), A(-16.f, 16.f), A(.4f, 4.f)) \
-	X(PK , A(20.f, 16000.f), A(-16.f, 16.f), A(.4f, 4.f)) \
-	X(PK , A(20.f, 16000.f), A(-16.f, 16.f), A(.4f, 4.f)) \
-	X(PK , A(20.f, 16000.f), A(-16.f, 16.f), A(.4f, 4.f)) \
-	X(PK , A(20.f, 16000.f), A(-16.f, 16.f), A(.4f, 4.f)) \
-	X(PK , A(20.f, 16000.f), A(-16.f, 16.f), A(.4f, 4.f))
+	X(LSC, A(20.f, 20000.f), A(-24.f, 24.f), A(.4f, 3.f)) \
+	X(HSC, A(20.f, 20000.f), A(-24.f, 24.f), A(.4f, 3.f)) \
+	X(PK , A(20.f, 20000.f), A(-24.f, 24.f), A(.4f, 4.f)) \
+	X(PK , A(20.f, 20000.f), A(-24.f, 24.f), A(.4f, 4.f)) \
+	X(PK , A(20.f, 20000.f), A(-24.f, 24.f), A(.4f, 4.f)) \
+	X(PK , A(20.f, 20000.f), A(-24.f, 24.f), A(.4f, 4.f)) \
+	X(PK , A(20.f, 20000.f), A(-24.f, 24.f), A(.4f, 4.f)) \
+	X(PK , A(20.f, 20000.f), A(-24.f, 24.f), A(.4f, 4.f)) \
+	X(PK , A(20.f, 20000.f), A(-24.f, 24.f), A(.4f, 4.f)) \
+	X(PK , A(20.f, 20000.f), A(-24.f, 24.f), A(.4f, 4.f)) \
+	X(PK , A(20.f, 20000.f), A(-24.f, 24.f), A(.4f, 4.f)) \
+	X(PK , A(20.f, 20000.f), A(-24.f, 24.f), A(.4f, 4.f)) \
+	X(PK , A(20.f, 20000.f), A(-24.f, 24.f), A(.4f, 4.f)) \
+	X(PK , A(20.f, 20000.f), A(-24.f, 24.f), A(.4f, 4.f)) \
+	X(PK , A(20.f, 20000.f), A(-24.f, 24.f), A(.4f, 4.f)) \
+	X(PK , A(20.f, 20000.f), A(-24.f, 24.f), A(.4f, 4.f)) \
+	X(PK , A(20.f, 20000.f), A(-24.f, 24.f), A(.4f, 4.f)) \
+	X(PK , A(20.f, 20000.f), A(-24.f, 24.f), A(.4f, 4.f)) \
+	X(PK , A(20.f, 20000.f), A(-24.f, 24.f), A(.4f, 4.f)) \
+	X(PK , A(20.f, 20000.f), A(-24.f, 24.f), A(.4f, 4.f)) \
+	X(PK , A(20.f, 20000.f), A(-24.f, 24.f), A(.4f, 4.f)) \
+	X(PK , A(20.f, 20000.f), A(-24.f, 24.f), A(.4f, 4.f)) \
+	X(PK , A(20.f, 20000.f), A(-24.f, 24.f), A(.4f, 4.f)) \
+	X(PK , A(20.f, 20000.f), A(-24.f, 24.f), A(.4f, 4.f)) \
+	X(PK , A(20.f, 20000.f), A(-24.f, 24.f), A(.4f, 4.f)) \
+	X(PK , A(20.f, 20000.f), A(-24.f, 24.f), A(.4f, 4.f)) \
+	X(PK , A(20.f, 20000.f), A(-24.f, 24.f), A(.4f, 4.f)) \
+	X(PK , A(20.f, 20000.f), A(-24.f, 24.f), A(.4f, 4.f)) \
+	X(PK , A(20.f, 20000.f), A(-24.f, 24.f), A(.4f, 4.f)) \
+	X(PK , A(20.f, 20000.f), A(-24.f, 24.f), A(.4f, 4.f)) \
+	X(PK , A(20.f, 20000.f), A(-24.f, 24.f), A(.4f, 4.f)) \
+	X(PK , A(20.f, 20000.f), A(-24.f, 24.f), A(.4f, 4.f))
 
 #define X_TYPE(t, f, g, q) t,
 #define   X_F0(t, f, g, q) f,

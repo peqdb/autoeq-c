@@ -93,6 +93,7 @@ Example output:
 Build:
 
 - `cc src/*.c -lm -o autoeq`
+- alternatively, it is possible to download prebuilt artifacts from the Actions tab
 
 The native binary is a low-level tool meant to be called from a script or part of a larger program.
 
